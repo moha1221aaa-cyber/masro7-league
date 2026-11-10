@@ -18,8 +18,9 @@ const SFX_EVENTS = [
     { g: "", k: "seg", label: "بداية الفقرة" },
     { g: "", k: "round", label: "فوز الجولة" }
 ];
-const SFX = { map: {}, sub: null, loaded: false };
-try { SFX.map = JSON.parse(localStorage.getItem("sfx_map") || "{}") || {}; } catch (e) { SFX.map = {}; }
+/* الدوري: الأصوات ثابتة (نفس اللي مختار في منصة فيكارو الثقافية 10 نوفمبر 2026)، بدون قائمة اختيار، والملفات اللي غيرها انشالت */
+const SFX_FIXED = {"strike": "14", "bad": "8", "seg": "22", "ok": "7", "miss": "16", "pass": "16", "time": "9", "spin": "9", "h3": "64", "h2": "62", "round": "17", "land": "67", "h1": "62"};
+const SFX = { map: Object.assign({}, SFX_FIXED), sub: null, loaded: true };
 /* تسجيل كل الملفات (المولّدة 1-6 وكل العينات مهما كان رقمها) عشان cineLoadSamples يقبلها */
 SFX_EVENTS.forEach(e => {
     for (let n = 1; n <= 6; n++) CINE_FILES["sx_" + e.k + "_" + n] = { g: 1 };
@@ -29,7 +30,8 @@ SFX_EVENTS.forEach(e => {
 function sfxId(k, n) { return "sx_" + k + "_" + n; }
 /* أصوات المسابقات (العلامة "G" في SFX_SAMPLES): أولها (61) هو الحالي، فيتحمّل مع أصوات البث الأساسية */
 function sfxIsGame(k, n) { return sfxSamples(k).some(x => String(x[0]) === String(n) && x[2] === "G"); }
-SFX_EVENTS.forEach(e => { const id = sfxId(e.k, 61); if (CINE_FILES[id] && CINE_CORE.indexOf(id) === -1) CINE_CORE.push(id); });
+/* الأصوات الثابتة تتحمّل مع أصوات البث الأساسية (وتنحفظ في الجهاز) */
+SFX_EVENTS.forEach(e => { const id = sfxId(e.k, SFX_FIXED[e.k]); if (CINE_FILES[id] && CINE_CORE.indexOf(id) === -1) CINE_CORE.push(id); });
 /* خيارات الحدث: 1 إلى 6 أنماط مولّدة (SFX_STYLES) و7 وما فوق عينات استوديو (SFX_SAMPLES من js/sfx-catalog.js) */
 function sfxSamples(k) { return (typeof SFX_SAMPLES !== "undefined" && SFX_SAMPLES[k]) || []; }
 function sfxChosen(k) {
@@ -59,6 +61,7 @@ function sfxApply(map) {
 }
 /* يسمع الاختيار المحفوظ (مرة وحدة): يستدعى لما ينفتح البث وقائمة الأصوات */
 function sfxListen() {
+    return;   /* الدوري: الاختيار ثابت (SFX_FIXED) وما يتغير من القاعدة */
     if (SFX.sub || typeof firebaseDB === "undefined" || !firebaseDB) return;
     try {
         SFX.sub = firebaseDB.collection("room").doc("main").collection("liveDiag").doc("_sfx").onSnapshot(s => {
