@@ -16,7 +16,7 @@ try {
     const host = await device(browser, db, "host", { live: "none" });
     host.removeAllListeners("dialog");
     const dialogs = [];
-    host.on("dialog", d => { dialogs.push(d.message()); d.type() === "prompt" ? d.accept(NAMES) : d.accept(); });
+    host.on("dialog", d => { dialogs.push(d.message()); (d.type() === "prompt" ? d.accept(NAMES) : d.accept()).catch(() => {}); });   /* بعد ما يتسكر المتصفح القبول يفشل، عادي */
     check("admin sees trial button", await until(() => host.evaluate(() => { const b = document.getElementById("trialBtn"); return b && b.offsetParent !== null && /تجريبية/.test(b.textContent); }), 10000));
     check("bcId normal before trial", await host.evaluate(() => bcId(1) === "round_1"));
     await host.click("#trialBtn");
@@ -49,7 +49,7 @@ try {
     check("add with results → result kept, all pairs, nobody twice in a round", c8 && c8.matches.length === 56 && rr(c8) && noClash(c8) && c8.matches.some(m => m.p1 === keep.p1 && m.p2 === keep.p2 && m.round === keep.round && m.s1 === "3"), c8 && c8.matches.length);
     /* حذف اللي له نتيجة */
     host.removeAllListeners("dialog");
-    host.on("dialog", d => { dialogs.push(d.message()); d.type() === "prompt" ? d.accept(NAMES) : d.accept(); });
+    host.on("dialog", d => { dialogs.push(d.message()); (d.type() === "prompt" ? d.accept(NAMES) : d.accept()).catch(() => {}); });   /* بعد ما يتسكر المتصفح القبول يفشل، عادي */
     await until(() => host.evaluate(() => players.length === 8), 5000);
     await host.evaluate(n => trialRemovePlayer(n), keep.p1);
     const c7b = await until(() => { const c = db.data("league/current"); return c.playersList.length === 7 ? c : null; }, 8000);

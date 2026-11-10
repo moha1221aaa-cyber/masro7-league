@@ -2,6 +2,7 @@
 /* ===== الشاشة الكاملة للبث ===== */
 function openLiveScreen(id) {
     if (!id) return;
+    if (typeof sfxListen === "function") sfxListen();   /* الأصوات اللي اختارها المنظم (js/sfx.js) */
     const scr = document.getElementById("liveScreen");
     if (!scr) return;
     if (!openLiveId) {
@@ -14,7 +15,7 @@ function openLiveScreen(id) {
     bcPrevKey = null;
     bcLastSpokenKey = "";
     bcAutoFx.prev = null;
-    bcRxSeenN = null;
+    if (typeof rxReset === "function") rxReset();
     bcTickerSig = "";
     bcEnterScene = ""; bcEnterPhase = "";
     TV.boardKey = ""; TV.sec = -1;
@@ -97,12 +98,16 @@ function closeLiveScreen(fromPop) {
         window.history.back();
         return;
     }
+    if (typeof recOn === "function" && recOn()) recStop(d);   /* طلع المنظم من البث: التسجيل ينحفظ */
     openLiveId = null;
+    if (typeof recOnClose === "function") recOnClose();
     const scr = document.getElementById("liveScreen");
     if (scr) scr.classList.remove("open");
     document.body.classList.remove("live-open");
     if (liveTickTimer) { clearInterval(liveTickTimer); liveTickTimer = null; }
     bcPredListen("");
+    sgDockPaint(null);
+    if (typeof rxSync === "function") rxSync(null);
     bcFlushPage();   /* اللي تأجل رسمه من صفحات الموقع وقت البث */
     bcStopSpeech();
     cineCloseAll();
@@ -116,6 +121,7 @@ function closeLiveScreen(fromPop) {
 }
 
 function liveTick() {
+    if (typeof recTick === "function") recTick(liveMatchesCache[openLiveId]);   /* تسجيل البث ومشاهدته (record.js) */
     const d = liveMatchesCache[openLiveId];
     if (!d) return;
     if (d.status === "scheduled") { bcTickClock(d); return; }
@@ -128,6 +134,8 @@ function liveTick() {
             cinePlay("heartbeat", 0.9);
             if (el.getAnimations) el.getAnimations().forEach(a => { a.cancel(); a.play(); });
         }
+    } else if (d.scene === "playing" && d.seg > 1) {
+        sgTick(d);   /* الفقرة الثانية والثالثة (segments.js): العجلة والعداد */
     } else if (d.scene === "playing") {
         const total = d.phase === "buzz" ? LIVE_BUZZ_MS : (d.phase === "answer" ? LIVE_ANSWER_MS : LIVE_REVEAL_MS);
         const ringEl = document.getElementById("lvRing");
@@ -171,8 +179,6 @@ function bcTickClock(d) {
         if (sec <= 10 && sec > 0) cinePlay(sec <= 3 ? "heartbeat" : "tick", sec <= 3 ? 0.9 : 0.6);
         if (sec === 0) {
             el.innerHTML = `<div class="now">الحين!</div>`;
-            const lb = document.getElementById("bcWaitNote");
-            if (lb) lb.textContent = isAdmin ? "الموعد جا، اضغط \"ابدأ البث الحين\"" : "الموعد جا، بانتظار المنظم يبدأ البث";
         }
     }
 }
@@ -323,6 +329,7 @@ function renderLiveScreenNow() {
     bcClockLast = -1;
     bcSceneEffects(d);
     bcAnnouncer(d);
+    sgFx(d);
     bcAutoFx(d);
     if (d.scene === "countdown" || d.scene === "playing") liveSoundsOnChange(d);
     else livePrevView = null;
@@ -337,7 +344,8 @@ function renderLiveScreenNow() {
 <div class="lv-top">
 <button class="rs-back" onclick="closeLiveScreen()">${ic("chevron-right")} خروج</button>
 <span class="lv-badge ${live ? "" : (sched ? "soon" : "off")}"><span class="dot"></span>${live ? `على الهواء <b id="bcAirClock" class="st-air">00:00</b>` : (sched ? "قريباً" : "انتهى البث")}</span>
-<span class="lv-round">الجولة ${escapeHTML(String(d.round || ""))}${live ? ` · ${ic("users")} <b id="bcListeners">…</b>` : ""}</span>
+${live && !(typeof BC_REPLAY !== "undefined" && BC_REPLAY) ? `<span class="lv-eye" title="الحضور">${ic("users")} <b id="bcListeners">…</b></span>` : ""}
+<span class="lv-round">الجولة ${escapeHTML(String(d.round || ""))}</span>
 ${isAdmin && (live || sched) ? `<button class="bc-endbtn" onclick="bcEnd()">${ic("power")} ${sched ? "إلغاء" : "إنهاء البث"}</button>` : ""}
 </div>`;
 
@@ -346,7 +354,7 @@ ${isAdmin && (live || sched) ? `<button class="bc-endbtn" onclick="bcEnd()">${ic
     R.pods = "";
     if (live && o && (d.scene === "talk" || d.scene === "countdown" || d.scene === "playing" || d.scene === "result")) {
         /* منصات المتسابقين: تنور منصة اللي ضغط الجرس */
-        const lit = (d.scene === "playing" && d.phase === "answer") ? d.answerer : 0;
+        const lit = (d.scene === "playing" && d.phase === "answer") ? d.answerer : ((d.scene === "playing" && d.seg > 1 && d.sg && d.sg.st === "play") ? d.sg.turn : 0);
         const nq = (d.questions || []).length || LIVE_Q_COUNT;
         const pod = n => `
 <div class="st-pod ${lit === n ? "lit" : ""} ${me === n ? "me" : ""} ${lit && lit !== n ? "dim" : ""}" ${(n === 1 ? o.uid1 : o.uid2) ? `data-bcuid="${escapeHTML(n === 1 ? o.uid1 : o.uid2)}"` : ""}>
@@ -355,7 +363,7 @@ ${isAdmin && (live || sched) ? `<button class="bc-endbtn" onclick="bcEnd()">${ic
 <div class="nm">${escapeHTML(n === 1 ? o.p1 : o.p2)}</div>
 <div class="st-desk">${showScoreHTML(d, n)}<i>أجوبة</i></div>
 </div>`;
-        const mid = d.scene === "talk" ? `الترحيب<small>قبل البداية</small>` : d.scene === "playing" ? (d.qIndex >= LIVE_Q_COUNT ? `ذهبي<small>سؤال الحسم</small>` : `السؤال ${d.qIndex + 1}<small>من ${LIVE_Q_COUNT}</small>`) : (d.scene === "result" ? "النتيجة" : "استعدوا");
+        const mid = d.scene === "talk" ? `الترحيب` : d.scene === "playing" ? (d.seg > 1 && d.sg ? (d.seg === 4 ? `ضد وند<small>الفقرة الرابعة</small>` : `الفقرة ${d.seg}<small>الجولة ${(d.sg.r || 0) + 1} من ${SG_ROUNDS}</small>`) : d.qIndex >= LIVE_Q_COUNT ? `ذهبي<small>سؤال الحسم</small>` : `السؤال ${d.qIndex + 1}<small>من ${LIVE_Q_COUNT}</small>`) : (d.scene === "result" ? "النتيجة" : "استعدوا");
         const mc = (d.scene === "talk" || d.scene === "countdown" || d.scene === "playing") ? bcMicCtlHTML(d) : "";
         R.pods = `
 ${mc ? `<div class="st-microw">${mc}</div>` : ""}
@@ -371,6 +379,8 @@ ${pod(2)}
     bcPatchRegions(body, R);
     showAfterRender(body, d);
     bcEntrance(body, d);
+    sgDockPaint(d);   /* أزرار المقدم في الفقرة الثانية والثالثة (برا الرسم الجزئي) */
+    if (typeof rxSync === "function") rxSync(d);   /* تفاعلات الجمهور (react.js) */
 
     const qc = body.querySelector(".st-qcard");
     /* still بس للوحة جديدة لنفس السؤال (انعاد بناء المشهد)، مو للوحة نفسها اللي للحين تتحرك (الرسم الجزئي ما يعيد بناءها) */
@@ -410,15 +420,15 @@ function liveSoundsOnChange(d) {
     if (!p) return;
     if (view.phase === "answer" && (p.phase !== "answer" || p.ans !== view.ans)) tvBuzzMoment(d);
     if (view.phase === "answer" && (p.phase !== "answer" || p.ans !== view.ans) && !d.passed && bcLocalBuzzQ !== openLiveId + "|" + d.cur + "|" + d.qIndex) cinePlay("buzz", 0.7);
-    if (view.phase === "answer" && d.passed && p.ans !== view.ans) cinePlay("wrong", 0.5);
+    if (view.phase === "answer" && d.passed && p.ans !== view.ans) SG_SFX.bad();
     if (view.phase === "buzz" && p.phase !== "buzz" && view.q > 0) cinePlay("whoosh", 0.4);
     if (view.phase === "reveal" && p.phase !== "reveal") {
         /* طبول تشويق تخلص بالضبط لحظة الكشف، وبعدها صح + تصفيق أو غلط + "آه" */
         const wait = Math.max(0, bcRevealAt(d) - bcNow());
         cinePlay("reveal", 0.75, { tail: Math.max(0.4, wait / 1000 + 0.15) });
         setTimeout(() => {
-            if (view.out) { cinePlay("correct", 0.7); cinePlay("applause", 0.4, { dur: 3 }); }
-            else cinePlay("wrong", 0.55);
+            if (view.out) { SG_SFX.ok(); cinePlay("applause", 0.4, { dur: 3 }); }
+            else SG_SFX.bad();
         }, wait);
     }
 }
@@ -447,7 +457,7 @@ let BC_PUB_LAST = null;
 function bcMicCtlHTML(d) {
     const net = bcConnState === "RECONNECTING" ? `<div class="bc-note">${ic("alert")} النت تقطّع، نرجع نوصل الصوت...</div>`
         : (bcNetQ >= 5 && bcTrack ? `<div class="bc-note">${ic("alert")} النت عندك ضعيف، صوتك ممكن يتقطع</div>` : "");
-    if (bcTrack && bcPolicyMuted) return net + `<div class="bc-note">${ic("mic-off")} مايكك جاهز، ينفتح بعد الشارة</div>`;
+    if (bcTrack && bcPolicyMuted) return net + `<div class="bc-note">${ic("mic-off")} مايكك جاهز</div>`;
     if (bcTrack) return net + `<button class="bc-mybtn ${bcSelfMuted ? "muted" : ""}" onclick="bcToggleSelfMute()">${ic(bcSelfMuted ? "mic-off" : "mic")} ${bcSelfMuted ? "مايكك مكتوم · اضغط للفتح" : "مايكك مفتوح · اضغط للكتم"}</button>`;
     if (bcShouldPublish(d)) return bcMicErr
         ? `<button class="bc-mybtn err" onclick="bcToggleSelfMute()">${ic("alert")} ${escapeHTML(bcMicErr)} · اضغط للمحاولة</button>`
@@ -485,7 +495,7 @@ function bcStageHTML(d, me) {
 <div class="bc-wait-t">يبدأ البث بعد</div>
 <div class="bc-clock" id="bcClock"></div>
 <div class="bc-wait-at">${ic("hourglass")} الساعة ${escapeHTML(bcTimeLabel(d.startAt || 0))}</div>
-<div class="lv-muted" id="bcWaitNote">البث يبدأ لما المنظم يبدأه</div>
+<div class="lv-muted" id="bcWaitNote"></div>
 <button class="bc-ghost" onclick="bcShare()">${ic("share")} أرسل رابط البث في الواتساب</button>
 </div>
 <div class="bc-fixtures">${bcFixturesHTML(d, false)}</div>
@@ -510,7 +520,7 @@ ${isAdmin ? `<div class="bc-admin"><button class="bc-go" onclick="bcGoLive()">${
 <div class="bc-sub">دوري بنو مسروح للنخبة · ${total} مواجهات · المنظم: ${escapeHTML(d.hostName || "")}</div>
 </div>
 <div class="bc-fixtures">${bcFixturesHTML(d, false)}</div>
-${isAdmin ? "" : `<div class="lv-muted">أول مواجهة تبدأ بعد شوي...</div>`}
+
 ${adminBar(`<button class="bc-go" onclick="bcNext(false)">${ic("zap")} ابدأ المواجهة الأولى</button>`)}`;
     }
 
@@ -534,16 +544,14 @@ ${uid ? `<div class="bc-st">المايك مقفل</div>` : `<div class="bc-st wa
         };
         let action;
         if (me && !d["ready" + me]) action = `<button class="lv-ready-btn" onclick="liveSetReady()">${ic("check-circle")} جاهز</button>`;
-        else if (me) action = `<div class="lv-muted">${ic("hourglass")} أنت جاهز، بانتظار خصمك...</div>`;
-        else action = `<div class="lv-muted">بانتظار المتسابقين يضغطون "جاهز"، وبعد الشارة تبدأ فقرة الترحيب بالمايكات</div>`;
+        else if (me) action = `<div class="lv-muted">${ic("check-circle")} جاهز</div>`;
+        else action = "";
         return `
 <div class="bc-mlabel big">المواجهة ${d.cur + 1} من ${total}</div>
 <div class="bc-vs">${side(1)}<div class="bc-vsx">VS</div>${side(2)}</div>
 ${ctx ? `<div class="st-ctx ${ctx.k}">${ic(ctx.k === "revenge" ? "zap" : "trophy")} ${escapeHTML(ctx.t)}</div>` : ""}
 ${bcPredHTML(d, o)}
-<div class="bc-note">${ic("mic-off")} المايكات تفتح بعد شارة البداية (لما يضغطون الاثنين "جاهز")</div>
 ${action}
-<div class="lv-rules">${LIVE_Q_COUNT} أسئلة · أسرع واحد يضغط الجرس يجاوب · إذا غلط أو خلص وقته ينتقل السؤال للثاني</div>
 ${adminBar(`<button class="bc-go" onclick="bcToTalk()">${ic("mic")} الترحيب بالمتسابقين الحين</button><button class="bc-ghost" onclick="bcNext(true)">تخطي المواجهة</button>`)}`;
     }
 
@@ -552,17 +560,16 @@ ${adminBar(`<button class="bc-go" onclick="bcToTalk()">${ic("mic")} الترحي
 <div class="st-talk">
 <div class="ic-wrap">${ic("mic")}</div>
 <div class="t">الترحيب بالمتسابقين</div>
-<div class="s">المايكات مفتوحة الحين للمنظم و${escapeHTML(o.p1)} و${escapeHTML(o.p2)}</div>
 </div>
-${isAdmin ? "" : `<div class="lv-muted">المنظم يرحّب بالمتسابقين، والأسئلة تبدأ بعد شوي...</div>`}
-${adminBar(`<button class="bc-go" onclick="bcForceStart()">${ic("rocket")} ابدأ المواجهة</button><button class="bc-ghost" onclick="bcNext(true)">تخطي المواجهة</button>`)}`;
+
+${adminBar(`<button class="bc-go" onclick="bcForceStart()">${ic("rocket")} ابدأ المواجهة</button>${bcIsReh(openLiveId) ? `<button class="bc-ghost" onclick="bcRehSkip()">${ic("rocket")} تخطي الأسئلة للفقرة الثانية (التجربة)</button>` : ""}<button class="bc-ghost" onclick="bcNext(true)">تخطي المواجهة</button>`)}`;
     }
 
     if (d.scene === "countdown") {
-        return `<div class="lv-muted">استعدوا!</div><div class="lv-count" id="lvCount">3</div><div class="lv-muted">السؤال الأول جاي...</div>`;
+        return `<div class="lv-muted">استعدوا!</div><div class="lv-count" id="lvCount">3</div>`;
     }
 
-    if (d.scene === "playing") return bcQuizHTML(d, me) + (isAdmin ? `<div class="bc-admin"><button class="lv-link" onclick="bcNext(true)">إيقاف المواجهة وتخطيها</button></div>` : "");
+    if (d.scene === "playing") return (d.seg > 1 ? bcSegHTML(d, me) : bcQuizHTML(d, me)) + (isAdmin ? `<div class="bc-admin">${bcIsReh(openLiveId) && !(d.seg > 1) ? `<button class="bc-ghost" onclick="bcRehSkip()">${ic("rocket")} تخطي فقرة الأسئلة (التجربة)</button>` : ""}<button class="lv-link" onclick="bcNext(true)">إيقاف المواجهة وتخطيها</button></div>` : "");
 
     if (d.scene === "result" && o) {
         const s1 = d.s1 || 0, s2 = d.s2 || 0;
@@ -581,6 +588,7 @@ ${adminBar(`<button class="bc-go" onclick="bcForceStart()">${ic("rocket")} اب�
         const pc = x => Math.round((x / nq) * 100) + "%";
         const fb = x => x > 0 ? bcSec(x) + " ث" : "—";
         const fb1 = d.fb1 || 0, fb2 = d.fb2 || 0;
+        const qw1 = (d.log || []).filter(x => x === 1).length, qw2 = (d.log || []).filter(x => x === 2).length;   /* نقاط فقرة الأسئلة بس */
         const fastest = fb1 && (!fb2 || fb1 <= fb2) ? 1 : (fb2 ? 2 : 0);
         return `
 <div class="lv-final ${kind}">
@@ -590,8 +598,8 @@ ${wAv ? `<img class="bc-win-av" src="${safeSrc(wAv)}" alt="">` : `<div class="tr
 </div>
 <div class="st-stats">
 <div class="h"><span>${escapeHTML(o.p1)}</span><span></span><span>${escapeHTML(o.p2)}</span></div>
-<div><b class="${s1 > s2 ? "hi" : ""}">${s1}</b><span>إجابات صحيحة</span><b class="${s2 > s1 ? "hi" : ""}">${s2}</b></div>
-<div><b>${pc(s1)}</b><span>نسبة النجاح</span><b>${pc(s2)}</b></div>
+<div><b class="${s1 > s2 ? "hi" : ""}">${s1}</b><span>${d.sp ? "مجموع النقاط" : "إجابات صحيحة"}</span><b class="${s2 > s1 ? "hi" : ""}">${s2}</b></div>
+${d.sp ? `<div><b>${qw1}</b><span>فقرة الأسئلة</span><b>${qw2}</b></div>${(d.sp.g2 || d.sp.g3) ? `<div><b>${(d.sp.g2 || [0, 0])[0]}</b><span>فقرة الحروف</span><b>${(d.sp.g2 || [0, 0])[1]}</b></div><div><b>${(d.sp.g3 || [0, 0])[0]}</b><span>فقرة الكلمات</span><b>${(d.sp.g3 || [0, 0])[1]}</b></div>${d.sp.g4 ? `<div><b>${d.sp.g4[0]}</b><span>ضد وند</span><b>${d.sp.g4[1]}</b></div>` : ""}` : ""}` : `<div><b>${pc(s1)}</b><span>نسبة النجاح</span><b>${pc(s2)}</b></div>`}
 <div><b class="${fastest === 1 ? "hi" : ""}">${fb(fb1)}</b><span>أسرع ضغطة جرس</span><b class="${fastest === 2 ? "hi" : ""}">${fb(fb2)}</b></div>
 </div>
 ${(() => { const c = bcPredCounts(d, d.cur); if (!c.t || !winner) return ""; const wn = s1 > s2 ? c.a : c.b; return `<div class="lv-muted">${ic("target")} ${wn} من ${c.t} توقعوا فوز ${escapeHTML(winner)}</div>`; })()}
@@ -616,7 +624,7 @@ ${(() => {
 })()}
 ${(() => { const b = bcPredBoard(d); if (!b.length) return ""; return `<div class="st-best"><div class="t">${ic("target")} أفضل المتوقعين</div>${b.map((x, i) => `<div>${i + 1}. <b>${escapeHTML(x.name)}</b> · ${x.ok} من ${x.all} صح</div>`).join("")}</div>`; })()}
 <div class="bc-fixtures">${bcFixturesHTML(d, true)}</div>
-${isAdmin ? "" : `<div class="lv-muted">شكراً لمتابعتكم، المنظم يختم البث...</div>`}
+
 ${adminBar(`<button class="bc-go" onclick="bcEnd()">${ic("power")} إنهاء البث</button>`)}`;
     }
     return `<div class="lv-muted">...</div>`;
@@ -658,7 +666,7 @@ ${d.phase === "answer" && !d.passed
         const canBuzz = !!me;
         html += `
 <button class="lv-bell ${canBuzz ? "" : "idle"}" id="lvBell" ${canBuzz ? `onpointerdown="event.preventDefault();liveBuzz(event)"` : "disabled"}>${ic("bell")}<span>${canBuzz ? "اضغط!" : "الجرس"}</span></button>
-<div class="lv-muted">${canBuzz ? "أسرع واحد يضغط الجرس هو اللي يجاوب" : "بانتظار أحد المتسابقين يضغط الجرس"}</div>`;
+`;
     } else if (d.phase === "answer") {
         /* 23 أكتوبر 2026 (قرار محمد): المتسابق يقول جوابه بالمايك، والمقدم يحكم. ما فيه تسجيل ولا كتابة */
         const nm = escapeHTML(livePlayerName(d, d.answerer));
@@ -666,12 +674,12 @@ ${d.phase === "answer" && !d.passed
 ${lastHTML}
 <div class="lv-turn">${d.passed ? ic("chevron-right") + " انتقل السؤال إلى " + nm : ic("bell") + " " + nm + " ضغط الجرس أول"}</div>`;
         if (me && me === d.answerer) html += `<div class="bc-sayit">${ic("mic")}<b>قل جوابك الحين بالمايك</b><span>المقدم يسمعك ويحكم</span></div>`;
-        else html += `<div class="lv-muted">${nm} يجاوب الحين، والمقدم يحكم...</div>`;
+        else html += "";
         if (isAdmin) {
             const ans = String(bcAnswerOf(d, d.qIndex) || "").split("|");
             if (!ans[0]) bcLoadSecret(openLiveId);
             html += `<div class="bc-judge">
-<div class="bc-judge-a"><small>الإجابة الصحيحة (تشوفها أنت بس)</small><b>${escapeHTML(ans[0] || "…")}</b>${ans.length > 1 ? `<span>${escapeHTML(ans.slice(1).join("، "))}</span>` : ""}</div>
+<div class="bc-judge-a"><small>الإجابة الصحيحة</small><b>${escapeHTML(ans[0] || "…")}</b>${ans.length > 1 ? `<span>${escapeHTML(ans.slice(1).join("، "))}</span>` : ""}</div>
 <div class="bc-verdict"><button class="ok" onclick="bcHostVerdict(true)">${ic("check-circle")} صح</button><button class="no" onclick="bcHostVerdict(false)">${ic("x-circle")} غلط</button></div>
 ${bcLateHTML(d)}
 </div>`;
@@ -695,8 +703,8 @@ ${(() => {
     /* السؤال الجاي بضغطة المقدم (23 أكتوبر 2026، قرار محمد) */
     const lastQ = d.qIndex + 1 >= (d.questions || []).length;
     return isAdmin
-        ? `${bcLateHTML(d)}<div class="bc-admin"><button class="bc-go bc-nextq" onclick="bcHostNextQ()">${ic(lastQ ? "trophy" : "zap")} ${lastQ ? "نتيجة المواجهة" : "السؤال التالي"}</button></div>`
-        : `<div class="lv-muted">${lastQ ? "بانتظار المقدم يعلن النتيجة" : "بانتظار المقدم يبدأ السؤال التالي"}</div>`;
+        ? `${bcLateHTML(d)}<div class="bc-admin"><button class="bc-go bc-nextq" onclick="bcHostNextQ()">${ic(lastQ ? "trophy" : "zap")} ${lastQ ? (d.seg === 1 ? "الفقرة الثانية: عجلة الحروف" : "نتيجة المواجهة") : "السؤال التالي"}</button></div>`
+        : "";
 })()}`;
     }
     return html;
@@ -750,6 +758,6 @@ function bcLateHTML(d) {
     if (!isAdmin) return "";
     const list = bcLateList(d);
     if (!list.length) return "";
-    return `<div class="bc-late"><small>جاوب صح قبل ينتهي وقته وما لحقت؟</small>${list.map(n =>
+    return `<div class="bc-late">${list.map(n =>
         `<button onclick="bcHostLateOk(${n})">${ic("check-circle")} ثبّت جواب ${escapeHTML(livePlayerName(d, n))} صح</button>`).join("")}</div>`;
 }

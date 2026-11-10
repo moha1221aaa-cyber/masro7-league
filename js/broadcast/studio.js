@@ -75,6 +75,7 @@ function bcPreScores(d) {
 /* سؤال الحسم: آخر سؤال والفرق نقطة أو تعادل */
 function bcIsGolden(d) { return !!d && d.status === "live" && d.scene === "playing" && (d.golden || 0) > 0 && d.qIndex >= LIVE_Q_COUNT; }
 function bcIsDecider(d) {
+    if (d && d.seg > 1) return false;   /* الفقرة الثانية والثالثة ما فيها سؤال حسم */
     if (bcIsGolden(d)) return true;
     const n = (d.questions || []).length;
     if (!d || d.status !== "live" || d.scene !== "playing" || !n || d.qIndex !== n - 1) return false;
@@ -299,6 +300,7 @@ function bcDirector(d) {
    الوثائق القديمة: d.pred */
 let bcPredDoc = null, bcPredSub = null, bcPredSubId = "";
 function bcPredListen(id) {
+    if (window.BC_REPLAY) id = "";
     if (bcPredSubId === (id || "")) return;
     if (bcPredSub) { bcPredSub(); bcPredSub = null; }
     bcPredSubId = id || ""; bcPredDoc = null;
@@ -372,28 +374,4 @@ function bcShare(id) {
 let bcDeepLink = (() => { try { return new URLSearchParams(location.search).get("live"); } catch (e) { return null; } })();
 
 
-/* ===== تفاعلات المشاهدين (بدون صوت) ===== */
-const BC_RX = ["👏", "🔥", "❤️"];
-let bcRxLastSend = 0, bcRxSeenN = null;
-function bcFloat(e, mine) {
-    const scr = document.getElementById("liveScreen");
-    if (!scr || CINE_REDUCED && !mine) return;
-    const f = document.createElement("div");
-    f.className = "st-float";
-    f.textContent = e;
-    f.style.left = (8 + Math.random() * 14) + "%";
-    f.style.setProperty("--dx", ((Math.random() - 0.5) * 80) + "px");
-    scr.appendChild(f);
-    setTimeout(() => f.remove(), 2700);
-}
-function bcReact(i) {
-    const e = BC_RX[i];
-    if (!e || !openLiveId) return;
-    bcFloat(e, true);
-    if (bcNow() - bcRxLastSend < 700 || !firebaseDB) return;
-    bcRxLastSend = bcNow();
-    const by = currentUser ? currentUser.uid : "guest";
-    liveCol().doc("rx_" + openLiveId).set({ type: "rx", e: e, n: bcNow() + Math.random(), by: by }).catch(() => {});
-}
-/* 23 أكتوبر 2026 (طلب محمد): أزرار التفاعل انشالت، وتفاعلات الجوالات اللي للحين على النسخة القديمة ما تطلع فوق البث */
-function bcOnRx(x) {}
+/* تفاعلات المشاهدين: js/broadcast/react.js */
