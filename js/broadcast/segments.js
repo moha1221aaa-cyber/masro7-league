@@ -9,9 +9,6 @@
    الحالة في وثيقة البث: d.seg (1 الأسئلة، 2، 3) و d.phase "s2" أو "s3" و d.sg (حالة الجولة الحالية، المنظم بس يكتبها).
    الكلمة السرية ما تنكتب في الوثيقة العامة: liveSecrets/seg_<id> (المنظم بس)، وتنكشف في sg.reveal لما تنتهي الجولة.
    كل أزرار المقدم في لوحة تحت الشاشة (#sgDock) خارج الرسم الجزئي، فخانة التخمين ما تنمسح مع تحديثات الشاشة. */
-/* نوافذ التأكيد والإدخال: موقع الدوري ما فيه js/dialogs.js (اللي في منصة فيكارو الثقافية)، فنستخدم نوافذ المتصفح بنفس الشكل البرمجي */
-if (typeof window.uiConfirm !== "function") window.uiConfirm = msg => Promise.resolve(window.confirm(msg));
-if (typeof window.uiPrompt !== "function") window.uiPrompt = (msg, val) => Promise.resolve(window.prompt(msg, val || ""));
 const SG_ROUNDS = 3;
 const SG_TURN2_MS = 10000;   /* وقت كل دور في فقرة الحروف */
 const SG_TURN3_MS = 10000;   /* وقت كل دور في فقرة الكلمات (طلب محمد 9 نوفمبر: 10 ث) */
