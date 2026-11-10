@@ -325,6 +325,38 @@ await no("bara guess: empty receipt", ctx.p2.doc(V("u_p2")).set(vote(null, { g: 
 await no("bara guess: in someone else's name", ctx.p2.doc(V("u_fan")).set(vote(null, { g: "v1.r" })));
 await no("bara vote: player deletes his vote", ctx.p1.doc(V("u_p1")).delete());
 
+/* ===== الفقرة الرابعة "ضد وند": اللي في بال المتسابق (10 نوفمبر 2026) ===== */
+const DP = u => "duelPicks/" + u;
+const pk = extra => Object.assign({ bid: "round_2", cur: 0, cat: "دول", pick: "اليابان", at: Date.now() }, extra || {});
+await ok("duel: player saves own pick", ctx.p1.doc(DP("u_p1")).set(pk()));
+await ok("duel: player changes own pick", ctx.p1.doc(DP("u_p1")).set(pk({ pick: "مصر" })));
+await ok("duel: player reads own pick", ctx.p1.doc(DP("u_p1")).get());
+await ok("duel: admin reads a pick", ctx.admin.doc(DP("u_p1")).get());
+await no("duel: opponent reads the pick", ctx.p2.doc(DP("u_p1")).get());
+await no("duel: fan reads the pick", ctx.fan.doc(DP("u_p1")).get());
+await no("duel: guest reads the pick", ctx.guest.doc(DP("u_p1")).get());
+await no("duel: player writes someone else's pick", ctx.p2.doc(DP("u_p1")).set(pk()));
+await no("duel: guest writes a pick", ctx.guest.doc(DP("u_guest")).set(pk()));
+await no("duel: empty pick", ctx.p1.doc(DP("u_p1")).set(pk({ pick: "" })));
+await no("duel: pick too long", ctx.p1.doc(DP("u_p1")).set(pk({ pick: "x".repeat(41) })));
+await no("duel: extra field", ctx.p1.doc(DP("u_p1")).set(pk({ win: true })));
+await no("duel: cur not a number", ctx.p1.doc(DP("u_p1")).set(pk({ cur: "0" })));
+await no("duel: player lists all picks", ctx.p1.collection("duelPicks").get());
+
+/* ===== تفاعلات الجمهور (10 نوفمبر 2026) ===== */
+const RXU = u => "room/main/liveRx/round_2/u/" + u;
+await ok("rx: viewer writes own reactions", ctx.fan.doc(RXU("u_fan")).set({ c: { "👏": 3, "🔥": 1 }, n: 1, at: Date.now() }));
+await ok("rx: viewer updates own reactions", ctx.fan.doc(RXU("u_fan")).set({ c: { "👏": 5 }, n: 2, at: Date.now() }));
+await no("rx: writes someone else's reactions", ctx.fan.doc(RXU("u_p1")).set({ c: { "👏": 1 }, n: 1, at: Date.now() }));
+await no("rx: guest writes reactions", ctx.guest.doc(RXU("u_guest")).set({ c: { "👏": 1 }, n: 1, at: Date.now() }));
+await no("rx: extra field", ctx.fan.doc(RXU("u_fan")).set({ c: { "👏": 1 }, n: 3, at: Date.now(), x: 1 }));
+await no("rx: too many emoji kinds", ctx.fan.doc(RXU("u_fan")).set({ c: { a: 1, b: 1, c: 1, d: 1, e: 1, f: 1, g: 1 }, n: 3, at: Date.now() }));
+await no("rx: viewer writes the summary", ctx.fan.doc("room/main/liveRx/round_2").set({ b: {}, n: 1, at: Date.now() }));
+await ok("rx: admin writes the summary", ctx.admin.doc("room/main/liveRx/round_2").set({ b: { u_fan: { "👏": 2 } }, n: 1, at: Date.now() }));
+await ok("rx: guest reads the summary", ctx.guest.doc("room/main/liveRx/round_2").get());
+await no("rx: viewer writes a recording", ctx.fan.doc("liveSecrets/rec_1").set({ x: 1 }));
+await no("rx: viewer reads recordings list", ctx.fan.doc("liveSecrets/_recs").get());
+
 await env.cleanup();
 if (failed) { console.log(failed + " failed"); process.exit(1); }
 console.log("all passed");

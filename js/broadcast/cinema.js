@@ -95,26 +95,28 @@ function cineGraph() {
     const master = c.createGain(); master.gain.value = 0.9;
     comp.connect(master); master.connect(c.destination);
     const bus = c.createGain(); bus.connect(comp);
-    Object.assign(CINE, { c, bus });
+    Object.assign(CINE, { c, bus, master });
     return CINE;
 }
-function cineNow() { return cineGraph().c.currentTime + 0.02; }
+function cineNow() { return cineGraph().c.currentTime + 0.04; }
 
 /* ===== مكتبة الأصوات الحقيقية =====
    g: تسوية مستوى كل ملف (عشان كلها تطلع بنفس العلو تقريباً قبل ما نحدد مستواها في المشهد) */
 const CINE_FILES = {
     braam: { g: 0.4 }, riser: { g: 0.65 }, impact: { g: 0.53 }, whoosh: { g: 1 }, slam: { g: 0.57 },
     heartbeat: { g: 1 }, fireworks: { g: 0.7 },
-    buzz: { g: 1.3 }, correct: { g: 1 }, wrong: { g: 0.78 }, tick: { g: 1.4 }, timeout: { g: 0.85 },
+    buzz: { g: 1.3 }, correct: { g: 0.8, fi: 0.045 }, wrong: { g: 0.78 }, tick: { g: 1.4 }, timeout: { g: 0.85 },
     /* طابع برامج المسابقات (مؤثرات قصيرة). الموسيقى (lobby، show_intro، interlude، decider، think2، outro، big_win) انشالت */
     reveal: { g: 0.83 }, match_end: { g: 0.81 }, applause: { g: 1 }, start_q: { g: 0.87 },
     /* نغمة شارة البداية (5.8 ث، مقطوعة من show_intro بتلاشي): طلب محمد 23 أكتوبر 2026، قبل الترحيب بالمتسابقين */
-    ident: { g: 0.55 }
+    ident: { g: 0.55 },
+    /* أزرار الفقرتين (ولدناها بـ tests/harness/audio/gen_sg.py): سلم صاعد في الفقرة 3، وكل زر صوته مختلف */
+    sg_miss: { g: 1 }, sg_strike: { g: 1 }, sg_h1: { g: 1 }, sg_h2: { g: 1 }, sg_h3: { g: 1 }, sg_ok: { g: 1, fi: 0.004 }
 };
 const CINE_BUF = {};
 const CINE_LOADING = {};
 /* الأصوات تتحمل حسب الحاجة: المؤثرات الصغيرة أول ما يفتح البث، والألعاب النارية (أكبر ملف) لما يقرب الختام */
-const CINE_CORE = ["buzz", "correct", "wrong", "tick", "timeout", "heartbeat", "whoosh", "riser", "braam", "slam", "impact", "start_q", "reveal", "match_end", "applause"];
+const CINE_CORE = ["sg_miss", "sg_strike", "sg_h1", "sg_h2", "sg_h3", "sg_ok", "buzz", "correct", "wrong", "tick", "timeout", "heartbeat", "whoosh", "riser", "braam", "slam", "impact", "start_q", "reveal", "match_end", "applause"];
 function cineNeedFor(d) {
     if (!d || d.status !== "live") return [];
     const left = (d.order || []).filter((o, i) => o.state === "pending" && i !== d.cur).length;
@@ -122,13 +124,25 @@ function cineNeedFor(d) {
     if (d.scene === "intro") return ["ident"];
     return [];
 }
+/* مخزن الأصوات (نفس الاسم في sw.js): كل صوت ينزل مرة وحدة وبعدها يشتغل بدون نت */
+const AUDIO_CACHE = "masro7-audio-v1";
+function cineAudioUrl(id) { return new URL("audio/" + id + ".mp3", location.href).href; }
+async function cineAudioFetch(id) {
+    const url = cineAudioUrl(id);
+    let cache = null;
+    try { cache = await caches.open(AUDIO_CACHE); } catch (e) {}
+    if (cache) { try { const hit = await cache.match(url); if (hit) return hit; } catch (e) {} }
+    const r = await fetch(url);
+    if (r.ok && r.status === 200 && cache && (r.headers.get("Content-Type") || "").indexOf("audio") !== -1) { try { await cache.put(url, r.clone()); } catch (e) {} }
+    return r;
+}
 function cineLoadSamples(ids) {
     let c;
     try { c = cineGraph().c; } catch (e) { return; }
     (ids || CINE_CORE).forEach(id => {
         if (!CINE_FILES[id]) return;
         if (CINE_BUF[id] || CINE_LOADING[id]) return;
-        CINE_LOADING[id] = fetch("audio/" + id + ".mp3")
+        CINE_LOADING[id] = cineAudioFetch(id)
             .then(r => {
                 if (!r.ok || (r.headers.get("Content-Type") || "").indexOf("audio") === -1) throw new Error("no file");
                 return r.arrayBuffer();
@@ -142,7 +156,7 @@ function cineLoadSamples(ids) {
    o.tail: نشغّل آخر جزء بس (الرايزر يخلص بالضبط لحظة الضربة)، o.dur: نقصّه بتلاشي ناعم */
 function cineS(id, t, v, o) {
     const b = CINE_BUF[id];
-    if (!b) return false;
+    if (!b || window.BC_REPLAY) return false;   /* المشاهدة المسجّلة: المؤثرات داخل التسجيل */
     /* وقت جوابي بالصوت ما يطلع أي مؤثر عندي (إلا صوت جرسي لحظة الضغط، قبل ما يبدأ التسجيل) */
     if (typeof VA !== "undefined" && VA.rec && id !== "buzz") return false;
     try {
@@ -153,10 +167,14 @@ function cineS(id, t, v, o) {
         CINE.fxUntil = Math.max(CINE.fxUntil || 0, performance.now() + (Math.max(0, t - c.currentTime) + b.duration) * 1000);
         const g = c.createGain();
         const vol = (v == null ? 1 : v) * ((CINE_FILES[id] || {}).g || 1);
-        g.gain.value = vol;
+        /* بداية ناعمة (6ms): الملفات تبدأ فجأة بصوت عالي، والمضغوط (compressor) كان يقطّع أول جزء ويطلع كأن بداية الصوت مقطوعة */
+        const st0 = t || cineNow();
+        g.gain.setValueAtTime(0.0001, st0);
+        /* correct: ملف مقصوص بدايته (يبدأ بصوت عالي بدون attack، شكوى محمد 10 نوفمبر) فبدايته أنعم (45ms)، وأي صوت يبدأ من نص الملف (tail) 50ms */
+        g.gain.linearRampToValueAtTime(vol, st0 + ((o && o.tail) ? 0.05 : ((CINE_FILES[id] || {}).fi || 0.006)));
         src.connect(g); g.connect(G.bus);
         const off = (o && o.tail) ? Math.max(0, b.duration - o.tail) : 0;
-        src.start(t || cineNow(), off);
+        src.start(st0, off);
         if (o && o.dur) {
             const st = t || cineNow();
             g.gain.setValueAtTime(vol, st + Math.max(0, o.dur - 0.5));
@@ -454,5 +472,5 @@ function bcAutoFx(d) {
     const p = bcAutoFx.prev;
     bcAutoFx.prev = view;
     if (!p || d.status !== "live") return;
-    if (view.lt && view.lt !== p.lt) cinePlay("timeout", 0.5);
+    if (view.lt && view.lt !== p.lt) { if (typeof SG_SFX !== "undefined") SG_SFX.time(); else cinePlay("timeout", 0.5); }
 }

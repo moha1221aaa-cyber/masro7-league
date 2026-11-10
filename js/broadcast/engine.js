@@ -66,7 +66,7 @@ const BC_TRIAL_ROUND = "التجريبية";
 /* ===== وقت السيرفر: فرق ساعة الجوال عن السيرفر، عشان المؤقتات تكون عادلة للكل ===== */
 let bcClockOffset = 0, bcClockSynced = false;
 try { bcClockOffset = Number(sessionStorage.getItem("bcClockOffset")) || 0; } catch (e) {}
-function bcNow() { return Date.now() + bcClockOffset; }
+function bcNow() { return window.BC_REPLAY ? window.BC_REPLAY.now() : Date.now() + bcClockOffset; }   /* المشاهدة المسجّلة (record.js): وقت التسجيل */
 async function bcSyncClock() {
     let best = null;
     for (let i = 0; i < 3; i++) {
@@ -132,9 +132,9 @@ function initLiveMatches() {
         snap.forEach(doc => {
             const x = doc.data();
             if (x && x.type === "round") next[doc.id] = x;
-            else if (x && x.type === "rx" && openLiveId && doc.id === "rx_" + openLiveId) bcOnRx(x);
         });
-        if (liveMatchesCache[BC_REH]) next[BC_REH] = liveMatchesCache[BC_REH];   /* البث الخاص من مستمع ثاني (bcRehListen) */
+        if (liveMatchesCache[BC_REH]) next[BC_REH] = liveMatchesCache[BC_REH];
+        if (liveMatchesCache.__replay) next.__replay = liveMatchesCache.__replay;   /* المشاهدة المسجّلة (record.js) */   /* البث الخاص من مستمع ثاني (bcRehListen) */
         bcNotifyChanges(liveMatchesCache, next);
         liveMatchesCache = next;
 
@@ -187,7 +187,7 @@ function bcNotifyChanges(prev, next) {
 
 function renderLiveBars() {
     let html = "";
-    Object.keys(liveMatchesCache).filter(id => isLiveActive(liveMatchesCache[id])).forEach(id => {
+    Object.keys(liveMatchesCache).filter(id => id !== "__replay" && isLiveActive(liveMatchesCache[id])).forEach(id => {
         const d = liveMatchesCache[id];
         const o = bcCur(d);
         let info = "الافتتاح";
@@ -333,7 +333,9 @@ function bcQuizReset() {
         ready1: false, ready2: false, qIndex: 0, phase: "wait",
         buzzer: 0, answerer: 0, tried1: false, tried2: false, passed: false,
         lastAnswer: null, outcome: 0, deadline: 0, s1: 0, s2: 0,
-        log: Array(LIVE_Q_COUNT).fill(-1), fb1: 0, fb2: 0, bh1: 0, bh2: 0, qAt: 0, golden: 0
+        log: Array(LIVE_Q_COUNT).fill(-1), fb1: 0, fb2: 0, bh1: 0, bh2: 0, qAt: 0, golden: 0,
+        /* فقرات المواجهة (segments.js): seg 1 الأسئلة، 2 عجلة الحروف، 3 خمّن الكلمة. sg حالة الجولة، sp نقاط الفقرتين */
+        seg: 1, sg: null, sp: {}
     };
 }
 
@@ -404,6 +406,7 @@ async function bcStartRound(r) {
 
 /* تنفيذ تعديل على البث داخل Transaction (عشان أسرع ضغطة جرس هي اللي تفوز فعلاً) */
 function liveTx(id, fn) {
+    if (window.BC_REPLAY) return Promise.resolve(null);   /* المشاهدة المسجّلة ما تكتب شي */
     const ref = liveRef(id);
     return firebaseDB.runTransaction(async tx => {
         const snap = await tx.get(ref);
@@ -512,6 +515,7 @@ async function bcOpenNext(id, skip) {
 /* المنظم يجيب الأجوبة الأصلية (لو فتح البث من جهاز ثاني أو بعد تحديث الصفحة) */
 let bcSecretTry = {};
 function bcLoadSecret(id, force) {
+    if (window.BC_REPLAY) return;
     if (!isAdmin || bcIsReh(id) || (bcSecrets[id] && bcPlans[id])) return Promise.resolve();   /* البث الخاص: الأجوبة في وثيقته نفسها */
     if (bcSecretTry[id] && !force) return bcSecretTry[id];
     bcSecretTry[id] = firebaseDB.collection("liveSecrets").doc(id).get().then(s => {
@@ -614,7 +618,12 @@ function liveRevealNext(d, now) {
     const next = (d.qIndex || 0) + 1;
     const qs = d.questions || [];
     if (next < qs.length) return liveQuestionUpd(next, now);
-    /* صافرة النهاية (والتعادل ينتهي تعادل، الدوري يحسبه نقطة لكل واحد: السؤال الذهبي انشال 22 أكتوبر 2026): نحفظ نتيجة المواجهة داخل البث وننتقل لمشهد النتيجة */
+    /* بعد آخر سؤال: الفقرة الثانية (عجلة الحروف) ثم الثالثة (خمّن الكلمة)، والنتيجة بعدها (segments.js). الوثائق القديمة بدون seg تنتهي زي قبل */
+    if (d.seg === 1) return sgEnter(d, 2, now);
+    return bcFinishUpd(d, now);
+}
+/* صافرة النهاية (والتعادل ينتهي تعادل، الدوري يحسبه نقطة لكل واحد: السؤال الذهبي انشال 22 أكتوبر 2026): نحفظ نتيجة المواجهة داخل البث وننتقل لمشهد النتيجة */
+function bcFinishUpd(d, now) {
     const order = (d.order || []).map(o => Object.assign({}, o));
     if (order[d.cur]) Object.assign(order[d.cur], { s1: d.s1 || 0, s2: d.s2 || 0, state: "done", applied: false, fb1: d.fb1 || 0, fb2: d.fb2 || 0, bh1: d.bh1 || 0, bh2: d.bh2 || 0 });
     return { scene: "result", phase: "done", order: order, deadline: 0, sceneAt: now };
@@ -771,6 +780,17 @@ function bcHostNextQ() {
     (typeof bcWaitNextQVoice === "function" ? bcWaitNextQVoice(d0) : Promise.resolve())
         .then(() => liveTx(id, (x, now) => (x.qIndex === d0.qIndex && x.cur === d0.cur) ? liveRevealNext(x, now) : null))
         .then(u => { if (!u) bcRedrawAll(); }).catch(err => { roomToast("تعذّر: " + err.message, "alert"); bcRedrawAll(); });
+}
+
+/* البث الخاص التجريبي بس (طلب محمد 10 نوفمبر): تخطي فقرة الأسئلة للفقرة الثانية، وتخطي الفقرة الثانية للثالثة، عشان تجرب الفقرات الجديدة بسرعة */
+function bcRehSkip() {
+    if (!isAdmin || openLiveId !== BC_REH) return;
+    liveTx(BC_REH, (x, now) => {
+        if (x.status !== "live" || !(x.scene === "talk" || x.scene === "countdown" || x.scene === "playing")) return null;
+        if (x.scene !== "playing" || x.seg === 1) return sgEnter(x, 2, now);
+        if (x.seg === 2 || x.seg === 3) return sgEnter(x, x.seg + 1, now);
+        return null;
+    }).catch(err => roomToast("تعذّر: " + err.message, "alert"));
 }
 
 /* من صفحة المتسابقين ← فقرة الترحيب */

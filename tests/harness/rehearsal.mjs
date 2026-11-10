@@ -52,6 +52,31 @@ try {
         const r = await until(() => db.data(REH).phase === "reveal" ? db.data(REH) : null, 6000);
         check("organizer judges the bot: correct → point", r && r.s1 + r.s2 === s0 + 1, r && [r.s1, r.s2]);
     }
+    /* تخطي فقرة الأسئلة (البث الخاص بس): الفقرة الثانية ثم الثالثة */
+    check("rehearsal: skip button shown on the questions segment", await host.evaluate(() => /تخطي فقرة الأسئلة/.test(document.getElementById("liveScreen").innerText)));
+    const beforeSkip = db.data(REH).s1 + db.data(REH).s2;
+    await host.evaluate(() => bcRehSkip());
+    const sk2 = await until(() => db.data(REH).seg === 2 ? db.data(REH) : null, 6000);
+    check("skip questions → segment 2 (cat wheel, scores kept)", sk2 && sk2.phase === "s2" && sk2.sg.st === "cat" && sk2.scene === "playing" && sk2.s1 + sk2.s2 === beforeSkip, sk2 && { seg: sk2.seg, st: sk2.sg.st });
+    check("rehearsal: dock has the skip-to-segment-3 button", await until(() => host.evaluate(() => /تخطي للفقرة الثالثة/.test(document.getElementById("sgDock")?.textContent || "")), 6000));
+    await sleep(500);
+    await host.evaluate(() => bcRehSkip());
+    const sk3 = await until(() => db.data(REH).seg === 3 ? db.data(REH) : null, 6000);
+    check("skip → segment 3", sk3 && sk3.phase === "s3" && sk3.sg.st === "cat", sk3 && { seg: sk3.seg });
+    await sleep(500);
+    check("rehearsal: dock has the skip-to-segment-4 button", await until(() => host.evaluate(() => /تخطي للفقرة الرابعة/.test(document.getElementById("sgDock")?.textContent || "")), 6000));
+    await host.evaluate(() => bcRehSkip());
+    const sk4 = await until(() => db.data(REH).seg === 4 ? db.data(REH) : null, 6000);
+    check("skip → segment 4 (ضد وند)", sk4 && sk4.phase === "s4" && sk4.sg.st === "cat", sk4 && { seg: sk4.seg });
+    await sleep(500);
+    await host.evaluate(() => duSetRoundCat(2));
+    check("host picks one category for both", !!await until(() => db.data(REH).sg.st === "pick" && db.data(REH).sg.cat === "دول", 6000));
+    check("rehearsal bots pick by themselves (host gets ready for both)", !!await until(() => { const d = db.data(REH); return d.sg.rd[0] && d.sg.rd[1] ? d : null; }, 9000));
+    await sleep(500);
+    await host.evaluate(() => bcRehSkip());
+    await sleep(600);
+    check("no skip beyond segment 4", db.data(REH).seg === 4);
+    check("skip does nothing outside the private broadcast", await host.evaluate(() => { const o = openLiveId; openLiveId = "round_9"; bcRehSkip(); openLiveId = o; return true; }) && db.data(REH).seg === 4);
     /* لا شي يتسرب للدوري */
     await host.evaluate(() => { const x = liveMatchesCache.rehearsal; x.order[0].state = "done"; bcApplyResults("rehearsal"); });
     await sleep(800);
