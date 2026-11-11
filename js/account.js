@@ -94,12 +94,12 @@ container.innerHTML = `
 <div class="stat-box-label">مجموع النقاط</div>
 </div>
 <div class="stat-box-item">
-<div class="stat-box-value" style="color:#4ade80;">${predStats.exact}</div>
-<div class="stat-box-label">توقع دقيق (5 ن)</div>
+<div class="stat-box-value" style="color:#4ade80;">${predStats.correct}</div>
+<div class="stat-box-label">توقعات صحيحة</div>
 </div>
 <div class="stat-box-item">
-<div class="stat-box-value" style="color:#38bdf8;">${predStats.correct}</div>
-<div class="stat-box-label">نتيجة صحيحة (3 ن)</div>
+<div class="stat-box-value" style="color:#38bdf8;">${predStats.total}</div>
+<div class="stat-box-label">كل توقعاته</div>
 </div>
 </div>
 </div>

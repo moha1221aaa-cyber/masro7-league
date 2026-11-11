@@ -71,8 +71,8 @@ let predStatsHTML = `
 <div class="stats-grid-box">
 <div class="stat-box-item"><div class="stat-box-value" style="color:#facc15;">#${predStats.rank}</div><div class="stat-box-label">ترتيب التوقعات</div></div>
 <div class="stat-box-item"><div class="stat-box-value" style="color:#38bdf8;">${predStats.points}</div><div class="stat-box-label">نقاط التوقعات</div></div>
-<div class="stat-box-item"><div class="stat-box-value" style="color:#4ade80;">${predStats.exact}</div><div class="stat-box-label">توقع دقيق (5 ن)</div></div>
-<div class="stat-box-item"><div class="stat-box-value" style="color:#a7f3d0;">${predStats.correct}</div><div class="stat-box-label">نتيجة صحيحة (3 ن)</div></div>
+<div class="stat-box-item"><div class="stat-box-value" style="color:#4ade80;">${predStats.correct}</div><div class="stat-box-label">توقعات صحيحة</div></div>
+<div class="stat-box-item"><div class="stat-box-value" style="color:#a7f3d0;">${predStats.total}</div><div class="stat-box-label">كل توقعاته</div></div>
 </div>
 </div>
 `;
@@ -349,7 +349,7 @@ box.innerHTML = `<summary>${ic("clapper")} ملخص بث الجولة ${escapeHT
 ${done.map(o => `<div class="rs-row"><span>${escapeHTML(o.p1)}</span><b>${o.s2 || 0} - ${o.s1 || 0}</b><span>${escapeHTML(o.p2)}</span></div>`).join("")}
 ${bm.fast ? `<div class="rs-line">${ic("zap")} أسرع ضغطة جرس: <b>${escapeHTML(bm.fast.name)}</b> في ${bcSec(bm.fast.ms)} ثانية</div>` : ""}
 ${bm.big ? `<div class="rs-line">${ic("trophy")} أكبر فوز: <b>${escapeHTML(bm.big.w)}</b> ${bm.big.a} - ${bm.big.b}</div>` : ""}
-${board.length ? `<div class="rs-line">${ic("target")} أفضل المتوقعين: ${board.slice(0, 3).map(x => `<b>${escapeHTML(x.name)}</b> (${x.ok}/${x.all})`).join("، ")}</div>` : ""}
+${board.length ? `<div class="rs-line">${ic("target")} أفضل المتفرجين في الموسم: ${board.slice(0, 3).map(x => `<b>${escapeHTML(x.name)}</b> (${x.p})`).join("، ")}</div>` : ""}
 </div>`;
 return box;
 }

@@ -1,57 +1,44 @@
-/* التوقعات: الحفظ، الحساب (5/3 نقاط)، ترتيب المتوقعين */
+/* التوقعات (11 نوفمبر 2026، طلب محمد): نفس نظام البث بالضبط (js/broadcast/predict.js):
+   المشاهد يختار فائز المواجهة أو التعادل (بدون إدخال نتيجة)، والتوقعات في نفس المكان predictions/<uid>_<المواجهة>،
+   فاللي يتوقعه هنا يطلع في البث، واللي يتوقعه في البث يطلع هنا. النقاط: الفائز صح 3، وفائز كل فقرة صح 1 (في البث)،
+   وكل توقعات المواجهة صح نقطتين زيادة. الترتيب ترتيب الموسم من league/predBoard (يحسبه جهاز المنظم).
+   التوقعات القديمة (نتيجة بالأرقام) تنقرا كفائز أو تعادل. */
 
 function loadPredictions() {
 if(!firebaseDB || !currentUser) return;
-if(predictionListener) predictionListener();
-
-predictionListener = firebaseDB.collection("predictions")
-.where("userId", "==", currentUser.uid)
-.onSnapshot(snapshot => {
-predictions = {};
-snapshot.forEach(doc => {
-let data = doc.data();
-predictions[data.matchId] = data;
-});
+prEnsure();
+predictions = PR.mine;
 renderPredictions();
 renderRankingUI();
-});
 }
 
+/* مواجهة الدوري بصيغة التوقعات (النتيجة، وفائزين الفقرات ولحظات القفل من البث لو انلعبت فيه) */
+function prMatchOf(m) {
+const key = getMatchId(m);
+const r = (PR.res && PR.res.k && PR.res.k[key]) || {};
+return { s1: m.s1, s2: m.s2, sw: r.sw || null, lk: r.lk || null };
+}
 function calculatePredictionPoints(pred, match) {
 if(!pred || !match || match.s1 === "" || match.s2 === "") return 0;
-let ps1 = Number(pred.s1), ps2 = Number(pred.s2);
-let ms1 = Number(match.s1), ms2 = Number(match.s2);
-
-if(ps1 === ms1 && ps2 === ms2) return 5; 
-
-let predOutcome = (ps1 > ps2) ? 1 : ((ps1 < ps2) ? -1 : 0);
-let matchOutcome = (ms1 > ms2) ? 1 : ((ms1 < ms2) ? -1 : 0);
-
-if(predOutcome === matchOutcome) return 3; 
-return 0;
+return prScore(pred, prMatchOf(match)).pts;
 }
 
-function savePrediction(matchId, p1InputId, p2InputId) {
-if(!currentUser) return alert("يرجى تسجيل الدخول لتتمكن من التوقع");
-
-let s1Val = document.getElementById(p1InputId).value;
-let s2Val = document.getElementById(p2InputId).value;
-
-if(s1Val === "" || s2Val === "") return alert("يرجى كتابة أرقام التوقع بالكامل");
-
-let docId = `${currentUser.uid}_${matchId}`;
-
-firebaseDB.collection("predictions").doc(docId).set({
-userId: currentUser.uid,
-matchId: matchId,
-s1: Number(s1Val),
-s2: Number(s2Val),
-updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-}, { merge: true })
-.then(() => {
-alert("تم حفظ التوقع بنجاح");
-})
-.catch(err => alert("خطأ أثناء حفظ التوقع: " + err.message));
+/* التوقع ينقفل لو المواجهة لها نتيجة، أو بدأت في بث مباشر */
+function prTabLocked(m) {
+if(m.s1 !== "" && m.s2 !== "") return true;
+const key = getMatchId(m);
+if(typeof liveMatchesCache === "undefined") return false;
+return Object.keys(liveMatchesCache).some(id => {
+const d = liveMatchesCache[id];
+if(!d || d.status !== "live" || d.rehearsal || id === "__replay") return false;
+return (d.order || []).some((o, i) => prBcKey(d, i) === key && (o.state === "done" || (i === d.cur && d.scene !== "intro") || ((d.lks || {})[i] || {}).w));
+});
+}
+function prTabPick(matchId, v) {
+if(!currentUser) return uiAlert("سجّل دخول من تبويب الحساب عشان تتوقع");
+const m = matches.find(x => getMatchId(x) === matchId);
+if(m && prTabLocked(m)) return roomToast("التوقع انقفل: المواجهة بدأت", "lock");
+prSave(matchId, "w", v).then(ok => { if(ok) roomToast("انحفظ توقعك", "check"); });
 }
 
 function renderPredictions() {
@@ -62,47 +49,45 @@ if(!currentUser) {
 container.innerHTML = `
 <div class="account-box">
 <h3><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg> توقع نتائج المواجهات</h3>
-<p class="login-message">يرجى تسجيل الدخول من تبويب "الحساب" لتشترك في التوقعات وتكسب النقاط!</p>
+<p class="login-message">سجّل دخول من تبويب "الحساب" عشان تتوقع وتجمع نقاط في ترتيب الموسم</p>
 <button onclick="showTab(null, 'accountTab')"><svg class="ic" aria-hidden="true"><use href="#i-rocket"/></svg> الذهاب لتسجيل الدخول</button>
 </div>
 `;
 return;
 }
+predictions = PR.mine;
 
 let upcomingMatches = matches.filter(m => m.s1 === "" || m.s2 === "");
 let completedMatches = matches.filter(m => m.s1 !== "" && m.s2 !== "");
+const me = prMyRow(currentUser.uid);
 
-let html = "";
+let html = `<div class="pr-tab-me">🎯 <b>${me.p}</b> نقطة${me.rank ? ` · المركز ${me.rank}` : ""}<small>الفائز صح ${PR_PTS.w} · فائز الفقرة في البث ${PR_PTS.g} · كلها صح +${PR_PTS.bonus}</small></div>`;
 
 if(upcomingMatches.length > 0) {
 html += `<h3 style="text-align:center; color:#60a5fa; margin:10px 0;"><svg class="ic" aria-hidden="true"><use href="#i-ball"/></svg> المواجهات القادمة للتوقع</h3>`;
 upcomingMatches.forEach(m => {
 let matchId = getMatchId(m);
-let pred = predictions[matchId] || { s1: "", s2: "" };
-let p1InputId = `pred_input_1_${matchId}`;
-let p2InputId = `pred_input_2_${matchId}`;
+let pick = prPick(predictions[matchId], "w");
+let locked = prTabLocked(m);
 let av1 = getPlayerAvatar(m.p1.name);
 let av2 = getPlayerAvatar(m.p2.name);
+const btn = (v, label) => `<button class="${pick === v ? "on" : ""}" ${locked ? "disabled" : ""} onclick="prTabPick(${jsArg(matchId)}, ${v})">${label}</button>`;
 
 html += `
-<div class="prediction-match">
-<div class="prediction-round">جولة ${m.round}</div>
+<div class="prediction-match ${locked ? "locked" : ""}">
+<div class="prediction-round">جولة ${m.round}${locked ? ` · ${ic("lock")} انقفل` : ""}</div>
 <div class="prediction-teams-box">
 <div class="prediction-player">
 <img loading="lazy" decoding="async" src="${safeSrc(av1.url)}" class="prediction-player-img" alt="">
 <div class="prediction-player-name">${escapeHTML(m.p1.name)}</div>
 </div>
-<div class="prediction-score">
-<input type="number" id="${p1InputId}" min="0" value="${pred.s1 !== "" ? pred.s1 : ""}" placeholder="-">
-<span>:</span>
-<input type="number" id="${p2InputId}" min="0" value="${pred.s2 !== "" ? pred.s2 : ""}" placeholder="-">
-</div>
+<div class="prediction-vs">ضد</div>
 <div class="prediction-player">
 <img loading="lazy" decoding="async" src="${safeSrc(av2.url)}" class="prediction-player-img" alt="">
 <div class="prediction-player-name">${escapeHTML(m.p2.name)}</div>
 </div>
 </div>
-<button class="prediction-save" onclick="savePrediction(${jsArg(matchId)}, ${jsArg(p1InputId)}, ${jsArg(p2InputId)})"><svg class="ic" aria-hidden="true"><use href="#i-save"/></svg> حفظ التوقع</button>
+<div class="prediction-picks">${btn(1, escapeHTML(m.p1.name))}${btn(0, "تعادل")}${btn(2, escapeHTML(m.p2.name))}</div>
 </div>
 `;
 });
@@ -111,17 +96,18 @@ html += `<div style="text-align:center; padding:20px; color:#94a3b8;">لا تو�
 }
 
 if(completedMatches.length > 0) {
-html += `<h3 style="text-align:center; color:#facc15; margin:20px 0 10px;"><svg class="ic" aria-hidden="true"><use href="#i-clipboard"/></svg> نتائج توقعاتك السابقة</h3>`;
+let done = "";
 completedMatches.forEach(m => {
 let matchId = getMatchId(m);
 let pred = predictions[matchId];
-if(pred) {
-let pts = calculatePredictionPoints(pred, m);
+if(!pred) return;
+const sc = prScore(pred, prMatchOf(m));
+const pick = prPick(pred, "w");
+const pickTxt = pick === 1 ? m.p1.name : (pick === 2 ? m.p2.name : (pick === 0 ? "تعادل" : "—"));
 let av1 = getPlayerAvatar(m.p1.name);
 let av2 = getPlayerAvatar(m.p2.name);
-let ptsColor = pts === 5 ? "#4ade80" : (pts === 3 ? "#38bdf8" : "#f87171");
-
-html += `
+let ptsColor = sc.pts >= PR_PTS.w ? "#4ade80" : (sc.pts > 0 ? "#38bdf8" : "#f87171");
+done += `
 <div class="prediction-match" style="border-color:#475569;">
 <div class="prediction-round">جولة ${m.round} (انتهت)</div>
 <div class="prediction-teams-box">
@@ -131,18 +117,18 @@ html += `
 </div>
 <div style="text-align:center;">
 <div style="font-size:16px; font-weight:bold; color:white;">${m.s1} : ${m.s2}</div>
-<div style="font-size:11px; color:#94a3b8; margin-top:2px;">توقعك: ${pred.s1} - ${pred.s2}</div>
+<div style="font-size:11px; color:#94a3b8; margin-top:2px;">توقعك: ${escapeHTML(pickTxt)}</div>
 </div>
 <div class="prediction-player">
 <img loading="lazy" decoding="async" src="${safeSrc(av2.url)}" class="prediction-player-img" alt="">
 <div class="prediction-player-name">${escapeHTML(m.p2.name)}</div>
 </div>
 </div>
-<div class="prediction-points" style="color:${ptsColor};">+${pts} نقاط</div>
+<div class="prediction-points" style="color:${ptsColor};">+${sc.pts} نقاط${sc.all > 1 ? ` <small>(${sc.ok} من ${sc.all} صح)</small>` : ""}</div>
 </div>
 `;
-}
 });
+if(done) html += `<h3 style="text-align:center; color:#facc15; margin:20px 0 10px;"><svg class="ic" aria-hidden="true"><use href="#i-clipboard"/></svg> نتائج توقعاتك السابقة</h3>` + done;
 }
 
 container.innerHTML = html;
@@ -177,87 +163,28 @@ else { renderRankingUI(); table(); }
 
 }
 
-/* توقعات الكل (لترتيب المتوقعين وملف المتسابق) تتحمل بس لما أحد يفتحها، بدل ما كل زائر يقراها أول ما يفتح الموقع */
-let predsRankingReady = false, predsRankingWaiters = [];
+/* ترتيب الموسم وثيقة وحدة (league/predBoard)، بدل ما كل زائر يقرا توقعات الكل */
+let predsRankingWaiters = [];
 function ensurePredictionRanking(onReady) {
-if(predsRankingReady) return true;
+if(typeof prEnsure === "function") prEnsure();
+if(PR.board) return true;
 if(onReady) predsRankingWaiters.push(onReady);
-if(!predictionsRankingListener && firebaseDB) {
-predictionsRankingListener = firebaseDB.collection("predictions").onSnapshot(snapshot => {
-cachedPredictionsData = {};
-snapshot.forEach(doc => {
-cachedPredictionsData[doc.id] = doc.data();
-});
-predsRankingReady = true;
+const t = setInterval(() => {
+if(!PR.board) return;
+clearInterval(t);
+const w = predsRankingWaiters; predsRankingWaiters = [];
+w.forEach(f => { try { f(); } catch(e) {} });
 renderRankingUI();
-predsRankingWaiters.splice(0).forEach(f => f());
-});
-}
+}, 400);
+setTimeout(() => clearInterval(t), 15000);
 return false;
 }
 
-/* أوسمة المتوقعين: قنّاص (3 توقعات دقيقة أو أكثر)، سلسلة (3 توقعات صحيحة ورا بعض)، نجم الجولة (أعلى نقاط في آخر جولة انلعبت) */
-function addPredictionBadges(list) {
-let lastRound = 0;
-list.forEach(u => (u.scored || []).forEach(g => { if(g.round > lastRound) lastRound = g.round; }));
-let roundPts = list.map(u => (u.scored || []).filter(g => g.round === lastRound).reduce((t, g) => t + g.pts, 0));
-let topRound = Math.max(0, ...roundPts);
-list.forEach((u, i) => {
-u.badges = [];
-if(u.exactCount >= 3) u.badges.push({ icon: "target", t: "قنّاص" });
-let run = 0, best = 0;
-(u.scored || []).sort((a, b) => a.idx - b.idx).forEach(g => { run = g.pts > 0 ? run + 1 : 0; best = Math.max(best, run); });
-if(best >= 3) u.badges.push({ icon: "zap", t: "سلسلة " + best });
-if(topRound > 0 && roundPts[i] === topRound) u.badges.push({ icon: "crown", t: "نجم الجولة " + lastRound });
-});
-}
-
 function getPredictionRankingList() {
-let userScores = {};
-
-Object.keys(cachedUsersData).forEach(uid => {
-let u = cachedUsersData[uid];
-userScores[uid] = {
-uid: uid,
-name: u.name || u.displayName || "مستخدم",
-email: u.email || "",
-photoURL: u.photoURL || "",
-points: 0,
-exactCount: 0,
-correctCount: 0
-};
+return prRank(PR.board).map(x => {
+const u = cachedUsersData[x.uid] || {};
+return { uid: x.uid, name: u.name || u.displayName || x.n || "مستخدم", photoURL: u.photoURL || "", points: x.p, correct: x.c, total: x.a };
 });
-
-Object.keys(cachedPredictionsData).forEach(docId => {
-let pred = cachedPredictionsData[docId];
-let uid = pred.userId;
-if(!userScores[uid]) {
-userScores[uid] = {
-uid: uid,
-name: "مستخدم",
-email: pred.userEmail || "",
-photoURL: "",
-points: 0,
-exactCount: 0,
-correctCount: 0
-};
-}
-
-let idx = matches.findIndex(m => getMatchId(m) === pred.matchId);
-let match = matches[idx];
-if(match && match.s1 !== "" && match.s2 !== "") {
-let pts = calculatePredictionPoints(pred, match);
-userScores[uid].points += pts;
-if(pts === 5) userScores[uid].exactCount++;
-else if(pts === 3) userScores[uid].correctCount++;
-(userScores[uid].scored = userScores[uid].scored || []).push({ idx: idx, round: match.round, pts: pts });
-}
-});
-
-let list = Object.values(userScores);
-list.sort((a,b) => b.points - a.points || b.exactCount - a.exactCount || b.correctCount - a.correctCount);
-addPredictionBadges(list);
-return list;
 }
 
 function renderRankingUI() {
@@ -292,8 +219,7 @@ html += `
 <div class="user-card-name">
 ${escapeHTML(item.name)} ${isMe ? '<span class="user-me-badge">أنت</span>' : ''}
 </div>
-<div class="user-card-stats">توقع صحيح: ${item.exactCount + item.correctCount}</div>
-${item.badges && item.badges.length ? `<div class="pred-badges">${item.badges.map(b => `<span class="pred-badge">${ic(b.icon)}${escapeHTML(b.t)}</span>`).join("")}</div>` : ""}
+<div class="user-card-stats">توقعات صحيحة: ${item.correct} من ${item.total}</div>
 </div>
 </div>
 <div class="user-card-score">
@@ -308,33 +234,7 @@ html += `</div>`;
 container.innerHTML = html;
 }
 
-function getUserPredictionStats(targetUid, targetEmail) {
-let rankingList = getPredictionRankingList();
-let rankIndex = rankingList.findIndex(item => item.uid === targetUid || (targetEmail && item.email === targetEmail.toLowerCase()));
-
-let totalPoints = 0;
-let exactCount = 0;
-let outcomeCount = 0;
-let totalPredictionsCount = 0;
-
-Object.keys(cachedPredictionsData).forEach(docId => {
-let pred = cachedPredictionsData[docId];
-if(pred && (pred.userId === targetUid || (targetEmail && pred.userEmail && pred.userEmail.toLowerCase() === targetEmail.toLowerCase()))) {
-totalPredictionsCount++;
-let match = matches.find(m => getMatchId(m) === pred.matchId);
-if(match && match.s1 !== "" && match.s2 !== "") {
-let pts = calculatePredictionPoints(pred, match);
-if(pts === 5) { totalPoints += 5; exactCount++; }
-else if(pts === 3) { totalPoints += 3; outcomeCount++; }
-}
-}
-});
-
-return {
-rank: rankIndex !== -1 ? (rankIndex + 1) : "-",
-points: totalPoints,
-exact: exactCount,
-correct: outcomeCount,
-total: totalPredictionsCount
-};
+function getUserPredictionStats(targetUid) {
+const r = prMyRow(targetUid);
+return { rank: r.rank || "-", points: r.p || 0, correct: r.c || 0, total: r.a || 0, exact: 0 };
 }
